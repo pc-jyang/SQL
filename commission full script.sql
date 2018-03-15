@@ -1,40 +1,3 @@
- /*select CONVERT(BIGINT, TO_CHAR(getdate(),'YYYYMMDDHH24MI'));
-
-insert into jyang_workspace.commission_batch(commission_batch_id, commission_start_date, redshift_created_date, redshift_updated_date) 
-values (201803072144, TO_DATE('2018-03-01','YYYY-MM-DD'), sysdate, sysdate);
-
-select * from jyang_workspace.commission_batch order by commission_batch_id desc;
-
-
--- 201803052111
-select max(commission_batch_id) from jyang_workspace.commission_batch;
-
-delete jyang_workspace.COMMISSION;
-
-delete jyang_workspace.COMMISSION_ADD_FUNDS_DETAIL;
-
-delete  jyang_workspace.COMMISSION_aum_detail;
-*/
- /* * * *
-  * SET commission batch id
-  * * * * */
-CREATE OR REPLACE FUNCTION f_get_commission_batch_id ()
-  returns BIGINT
-stable
-as $$
-  SELECT 201803072144
-$$ language sql;
-
- /* * * *
-  * SET commission month
-  * * * * */
-CREATE OR REPLACE FUNCTION f_get_commission_month ()
-  returns DATE
-stable
-as $$
-  SELECT TO_DATE('2018-03-01','YYYY-MM-DD')
-$$ language sql;
-
  /* * * *
   *
   * Add initial trading for fa role
@@ -482,56 +445,19 @@ insert into jyang_workspace.commission
                     and t2.created_by_name <> 'api user'
             join salesforce_schema.account a on t.account_id = a.account_id and is_test = 0
             cross join jyang_workspace.commission_config xc
-            where t.type in ('SA Held - Info Gathering', 'SA Held', 'SA Meeting Held', 'SA Held - In Person Info Gathering')
+            where t.type in ('SA Held - Info Gathering', 'SA Held', 'SA Meeting Held', 'SA Held - In Person Info Gathering','SA - Held')
             and t.activity_date >= add_months($2, -1)
-            and xc.comm_type = 'sa-meeting-set-fa-ig-held' and xc.emp_role = 'sa'
-            union all
-            select  /*+ ordered */
-                  'lead-id-' || l.lead_id account_id  -- filler to keep account id unique
-                , l.lead_id lead_id
-                -- , l.dw_encrypted_name
-                , xc.program_name
-                , t.task_id
-                , null user_id
-                , null
-                , null first_financial_advisor_name
-                , l.owner_id financial_advisor_idt
-                , l.owner_name financial_advisor_name
-                , 0 is_terminated
-                , add_months(last_day(trunc(t.activity_date)) + 1, xc.add_months) comm_date
-                , add_months(last_day(trunc(t.activity_date)) + 1, xc.add_months) comm_term_date
-                , null term_date
-                , xc.comm_type
-                , xc.period
-                , xc.emp_role
-                , t2.activity_date sa_meet_set_act_date
-                -- override meeting set data for api user to owner
-                , t2.created_by_id sa_meet_set_act_by_id
-                , t2.created_by_name sa_meet_set_act_by_name
-                , t.activity_date fa_meet_held_act_date
-                , t.created_by_id fa_meet_held_act_by_id
-                , t.created_by_name fa_meet_held_act_by_name
-                , t.type fa_meet_held_type
-                , xc.base_rate                                  
-                , xc.bonus_rate
-                , base_rate +  xc.bonus_rate total_rate
-                , row_number() over (partition by t.who_id order by t.created_date desc, t2.created_date desc) sort_seq
-            from salesforce_schema.task t 
-            join salesforce_schema.task t2 on t.who_id = t2.who_id and  t.task_id <> t2.task_id and t2.type = 'SA Meeting Set' 
-                  and t2.created_by_name <> 'api user'
-            join salesforce_schema.lead l on t.who_id = l.lead_id
-            cross join jyang_workspace.commission_config xc
-            where t.type in ('SA Held - Info Gathering', 'SA Held', 'SA Meeting Held')
-            and t.activity_date >= add_months($2, -1)
+			and t.activity_date < $2
+			-- and t2.activity_date < $2
             and xc.comm_type = 'sa-meeting-set-fa-ig-held' and xc.emp_role = 'sa'            
             ) v
-        left outer join jyang_workspace.commission comm on v.account_id = comm.account_id and  comm.comm_type = 'sa-meeting-set-fa-ig-held' 
-                        and v.comm_date = comm.comm_date and comm.emp_role = 'sa' and comm.status = 'final' AND comm.commission_batch_id = $1
-        left outer join jyang_workspace.commission comm2 on v.lead_id = comm2.lead_id and comm2.comm_type = 'sa-meeting-set-fa-ig-held' 
-                        and v.comm_date = comm2.comm_date and comm2.emp_role = 'sa' and comm2.status = 'final' AND comm2.commission_batch_id = $1
+        -- left outer join jyang_workspace.commission comm on v.account_id = comm.account_id and  comm.comm_type = 'sa-meeting-set-fa-ig-held' 
+        --                and v.comm_date = comm.comm_date and comm.emp_role = 'sa' and comm.status = 'final' AND comm.commission_batch_id = $1
+        -- left outer join jyang_workspace.commission comm2 on v.lead_id = comm2.lead_id and comm2.comm_type = 'sa-meeting-set-fa-ig-held' 
+        --                and v.comm_date = comm2.comm_date and comm2.emp_role = 'sa' and comm2.status = 'final' AND comm.commission_batch_id = $1
         where v.sort_seq = 1
-        and comm.account_id is null
-        and comm2.lead_id is null
+        -- and comm.account_id is null
+        -- and comm2.lead_id is null
         and v.comm_date <= trunc(sysdate)
         and v.comm_date >= $2; 
         
@@ -712,7 +638,7 @@ insert into jyang_workspace.commission
                     where aum.investment_closed_term_date >= add_months($2,-1) -- offset for start comm date to look at last month
                     and aum.investment_closed_term_date < add_months(last_day(trunc(sysdate)),-1)+1
                     and x.comm_type not like 'termination%'
-                    and aum.investment_closed_term_date - x.initial_trading_date < 366
+                    and datediff(day,x.initial_trading_date, aum.investment_closed_term_date) < 366
                     and x.comm_date < trunc(sysdate)
                     and emp_role = 'fa'
                     and x.comm_type = 'initial-funding'
@@ -733,8 +659,7 @@ UPDATE jyang_workspace.commission
         , financial_advisor_id = source.financial_advisor_id
         , opportunity_owner_name = source.opportunity_owner_name
         , opportunity_owner_id = source.opportunity_owner_id
-        , pay_to_name = CASE WHEN source.pay_to_name LIKE '%CFP' THEN source.pay_to_name ELSE replace(source.pay_to_name,source.pay_to_name, source.pay_to_name||' CFP') END 
-		--, pay_to_name = replace(source.pay_to_name,source.pay_to_name, source.pay_to_name||' CFP')
+        , pay_to_name = CASE WHEN source.pay_to_name LIKE '%CFP' THEN source.pay_to_name ELSE replace(source.pay_to_name,source.pay_to_name, source.pay_to_name||' CFP') END
         , pay_to_id = source.pay_to_id
         , pcg_financial_advisor_id = source.pcg_financial_advisor
         , pcg_financial_advisor_name = source.pcg_financial_advisor_name
@@ -816,14 +741,14 @@ delete from jyang_workspace.commission
 where commission_batch_id = $1
 and comm_type like 'additions-year%'
 and comm_date >= to_date('2016-02-01', 'YYYY-MM-DD')
-and pay_to_name = 'Scott Walker';
+and pay_to_name = 'Scott Walker CFP';
         
 -- Scott Walker max commissions overall
 PREPARE prep_exception_Updates_03 (bigint) AS       
 delete from jyang_workspace.commission 
 where commission_batch_id = $1
 and comm_date >= to_date('2017-02-01', 'YYYY-MM-DD')
-and pay_to_name = 'Scott Walker';
+and pay_to_name = 'Scott Walker CFP';
 
 -- Mike Hefty override
 PREPARE prep_exception_Updates_04 (bigint) AS 
@@ -831,26 +756,26 @@ delete from jyang_workspace.commission
 where commission_batch_id = $1
 and comm_type like 'additions-year%'
 and comm_date >= to_date('2016-07-01', 'YYYY-MM-DD')
-and pay_to_name = 'Mike Hefty';
+and pay_to_name = 'Mike Hefty CFP';
 
 -- Mike Hefty max commissions overall
 PREPARE prep_exception_Updates_05 (bigint) AS 
 delete from jyang_workspace.commission 
 where commission_batch_id = $1
 and comm_date >= to_date('2017-07-01', 'YYYY-MM-DD')
-and pay_to_name = 'Mike Hefty';
+and pay_to_name = 'Mike Hefty CFP';
 
 PREPARE prep_exception_Updates_06 (bigint) AS 
 delete from jyang_workspace.commission 
 where commission_batch_id = $1
 and comm_date >= to_date('2017-07-01', 'YYYY-MM-DD')
-and pay_to_name = 'Mike Hefty';
+and pay_to_name = 'Mike Hefty CFP';
 
 -- Michelle Brownstein max initial 
 PREPARE prep_exception_Updates_07 (bigint) AS 
 delete from jyang_workspace.commission 
 where commission_batch_id = $1
-and pay_to_name = 'Michelle Brownstein'
+and pay_to_name like 'Michelle Brownstein%'
 and comm_type = 'initial-funding'
 and initial_trading_date >= to_date('2016-09-01', 'YYYY-MM-DD');
 
@@ -858,14 +783,14 @@ and initial_trading_date >= to_date('2016-09-01', 'YYYY-MM-DD');
 PREPARE prep_exception_Updates_08 (bigint) AS 
 delete from jyang_workspace.commission 
 where commission_batch_id = $1
-and pay_to_name = 'Michelle Brownstein'
+and pay_to_name like 'Michelle Brownstein%'
 and comm_date >= to_date('2017-09-01', 'YYYY-MM-DD');
 
 -- Amin Dabit max initial 
 PREPARE prep_exception_Updates_09 (bigint) AS 
 delete from jyang_workspace.commission 
 where commission_batch_id = $1
-and pay_to_name = 'Amin Dabit'
+and pay_to_name like 'Amin Dabit%'
 and comm_type = 'initial-funding'
 and initial_trading_date >= to_date('2017-01-01', 'YYYY-MM-DD');
 
@@ -873,14 +798,14 @@ and initial_trading_date >= to_date('2017-01-01', 'YYYY-MM-DD');
 PREPARE prep_exception_Updates_10 (bigint) AS 
 delete from jyang_workspace.commission 
 where commission_batch_id = $1
-and pay_to_name = 'Amin Dabit'
+and pay_to_name like 'Amin Dabit%'
 and comm_date >= to_date('2018-02-01', 'YYYY-MM-DD');
         
 -- Andrew Thompson  max initial
 PREPARE prep_exception_Updates_11 (bigint) AS 
 delete from jyang_workspace.commission 
 where commission_batch_id = $1
-and pay_to_name = 'Andrew Thompson'
+and pay_to_name = 'Andrew Thompson CFP'
 and comm_type = 'initial-funding'
 and initial_trading_date >= to_date('2017-03-01', 'YYYY-MM-DD');
 
@@ -888,14 +813,14 @@ and initial_trading_date >= to_date('2017-03-01', 'YYYY-MM-DD');
 PREPARE prep_exception_Updates_12 (bigint) AS 
 delete from jyang_workspace.commission 
 where commission_batch_id = $1
-and pay_to_name = 'Andrew Thompson'
+and pay_to_name = 'Andrew Thompson CFP'
 and comm_date >= to_date('2018-02-01', 'YYYY-MM-DD');
  
 -- Bryan Lennon  max initial
 PREPARE prep_exception_Updates_13 (bigint) AS 
 delete from jyang_workspace.commission 
 where commission_batch_id = $1
-and pay_to_name = 'Bryan Lennon'
+and pay_to_name = 'Bryan Lennon CFP'
 and comm_type = 'initial-funding'
 and initial_trading_date >= to_date('2017-04-01', 'YYYY-MM-DD');
 
@@ -903,14 +828,14 @@ and initial_trading_date >= to_date('2017-04-01', 'YYYY-MM-DD');
 PREPARE prep_exception_Updates_14 (bigint) AS 
 delete from jyang_workspace.commission 
 where commission_batch_id = $1
-and pay_to_name = 'Bryan Lennon'
+and pay_to_name = 'Bryan Lennon CFP'
 and comm_date >= to_date('2018-06-01', 'YYYY-MM-DD');
  
 -- Garrett Gunberg max initial
 PREPARE prep_exception_Updates_15 (bigint) AS 
 delete from jyang_workspace.commission 
 where commission_batch_id = $1
-and pay_to_name = 'Garrett Gunberg'
+and pay_to_name = 'Garrett Gunberg CFP'
 and comm_type = 'initial-funding'
 and initial_trading_date >= to_date('2017-08-01', 'YYYY-MM-DD');
 
@@ -918,14 +843,14 @@ and initial_trading_date >= to_date('2017-08-01', 'YYYY-MM-DD');
 PREPARE prep_exception_Updates_16 (bigint) AS 
 delete from jyang_workspace.commission 
 where commission_batch_id = $1
-and pay_to_name = 'Garrett Gunberg'
+and pay_to_name = 'Garrett Gunberg CFP'
 and comm_date >= to_date('2018-09-01', 'YYYY-MM-DD');
 
 -- Adam Mazzaro max initial
 PREPARE prep_exception_Updates_17 (bigint) AS 
 delete from jyang_workspace.commission 
 where commission_batch_id = $1
-and pay_to_name = 'Adam Mazzaro'
+and pay_to_name = 'Adam Mazzaro CFP'
 and comm_type = 'initial-funding'
 and initial_trading_date >= to_date('2017-08-01', 'YYYY-MM-DD');
 
@@ -933,14 +858,14 @@ and initial_trading_date >= to_date('2017-08-01', 'YYYY-MM-DD');
 PREPARE prep_exception_Updates_18 (bigint) AS 
 delete from jyang_workspace.commission 
 where commission_batch_id = $1
-and pay_to_name = 'Adam Mazzaro'
+and pay_to_name = 'Adam Mazzaro CFP'
 and comm_date >= to_date('2018-09-01', 'YYYY-MM-DD');
  
 -- Whitney Pappas max initial
 PREPARE prep_exception_Updates_19 (bigint) AS 
 delete from jyang_workspace.commission 
 where commission_batch_id = $1
-and pay_to_name = 'Whitney Pappas'
+and pay_to_name = 'Whitney Pappas CFP'
 and comm_type = 'initial-funding'
 and initial_trading_date >= to_date('2017-08-01', 'YYYY-MM-DD');
 
@@ -948,14 +873,14 @@ and initial_trading_date >= to_date('2017-08-01', 'YYYY-MM-DD');
 PREPARE prep_exception_Updates_20 (bigint) AS 
 delete from jyang_workspace.commission 
 where commission_batch_id = $1
-and pay_to_name = 'Whitney Pappas'
+and pay_to_name = 'Whitney Pappas CFP'
 and comm_date >= to_date('2018-09-01', 'YYYY-MM-DD');
  
 -- Michael Eichinger max initial
 PREPARE prep_exception_Updates_21 (bigint) AS 
 delete from jyang_workspace.commission 
 where commission_batch_id = $1
-and pay_to_name = 'Michael Eichinger'
+and pay_to_name = 'Michael Eichinger CFP'
 and comm_type = 'initial-funding'
 and initial_trading_date >= to_date('2017-08-01', 'YYYY-MM-DD');
 
@@ -963,23 +888,71 @@ and initial_trading_date >= to_date('2017-08-01', 'YYYY-MM-DD');
 PREPARE prep_exception_Updates_22 (bigint) AS 
 delete from jyang_workspace.commission 
 where commission_batch_id = $1
-and pay_to_name = 'Michael Eichinger'
+and pay_to_name = 'Michael Eichinger CFP'
 and comm_date >= to_date('2018-09-01', 'YYYY-MM-DD');
     
 PREPARE prep_exception_Updates_23 (bigint) AS 
 delete from jyang_workspace.commission
 where commission_batch_id = $1
-and pay_to_name = 'Ryan Koenig' 
+and pay_to_name = 'Ryan Koenig CFP' 
 and comm_date >= to_date('2017-08-01', 'YYYY-MM-DD');
 
 PREPARE prep_exception_Updates_24 (bigint) AS 
 delete from jyang_workspace.commission
 where commission_batch_id = $1
-and pay_to_name = 'Ryan Koenig' 
+and pay_to_name = 'Ryan Koenig CFP' 
 and comm_date >= to_date('2017-08-01', 'YYYY-MM-DD');
 
--- Current Financial Advisor USER ID's of Dan, Jeff and Kyle
+/*
+Newly added
+*/
+-- Paige Sheeder initial
 PREPARE prep_exception_Updates_25 (bigint) AS 
+delete from jyang_workspace.commission
+where commission_batch_id = $1
+and pay_to_name = 'Paige Sheeder CFP'
+and initial_trading_date >= to_date('2018-01-01', 'YYYY-MM-DD');
+
+-- Paige Sheeder max overall
+PREPARE prep_exception_Updates_26 (bigint) AS 
+delete from jyang_workspace.commission
+where commission_batch_id = $1
+and pay_to_name = 'Paige Sheeder CFP'
+and comm_date >= to_date('2019-01-01', 'YYYY-MM-DD');
+
+PREPARE prep_exception_Updates_27 (bigint) AS 
+delete from jyang_workspace.commission
+where commission_batch_id = $1
+and pay_to_name in ( 'Adam Mazzaro CFP' , 'Joseph Hurab CFP', 'Brandon Peters CFP')       
+and comm_date >= to_date('2018-01-01', 'YYYY-MM-DD')
+and initial_trading_date <= to_date( '2017-11-30', 'YYYY-MM-DD');
+
+PREPARE prep_exception_Updates_28 (bigint) AS 
+delete from jyang_workspace.commission
+where commission_batch_id = $1
+and pay_to_id in ( '005F0000007k4kfIAA', '0050G000008LBxpQAG', '0050G000008LGu3QAG', '0050G000008LaHnQAK')       
+and comm_date >= to_date('2018-02-01', 'YYYY-MM-DD');   
+
+-- Michael Hunter initial
+PREPARE prep_exception_Updates_29 (bigint) AS 
+delete from jyang_workspace.commission
+where commission_batch_id = $1
+and pay_to_name = 'Michael Hunter CFP'
+and initial_trading_date >= to_date('2017-03-01', 'YYYY-MM-DD');
+        
+-- Michael Hunter max overall
+PREPARE prep_exception_Updates_30 (bigint) AS 
+delete from jyang_workspace.commission
+where commission_batch_id = $1
+and pay_to_name = 'Michael Hunter CFP'
+        and comm_date >= to_date('2018-03-01', 'YYYY-MM-DD');
+
+/*
+newly added end
+*/
+
+-- Current Financial Advisor USER ID's of Dan, Jeff and Kyle
+PREPARE prep_exception_Updates_31 (bigint) AS 
 delete from jyang_workspace.commission
 where commission_batch_id = $1
 and financial_advisor_id in ('005F0000002Bn36IAC'
@@ -987,7 +960,7 @@ and financial_advisor_id in ('005F0000002Bn36IAC'
                             ,'005A0000000r8anIAA');
         
 --Pay to Names of TERMINATED Financial Advisors
-PREPARE prep_exception_Updates_26 (bigint) AS 
+PREPARE prep_exception_Updates_32 (bigint) AS 
 delete from jyang_workspace.commission 
 where commission_batch_id = $1
 and pay_to_id in ('005A0000001H54PIAS'
@@ -1013,7 +986,11 @@ and pay_to_id in ('005A0000001H54PIAS'
                  ,'005F0000002Bn36IAC'
                  ,'005F00000045BfMIAU'
                  ,'005F00000046CiQIAU'
-                 ,'005F00000047izxIAA');
+                 ,'005F00000047izxIAA'
+				  -- Brian Coburn
+				 ,'0050G0000096LYNQA2'
+				 -- Patrick Duggan
+                 ,'005F00000089drFIAQ');
                  
 PREPARE prep_set_Status_To_Final (bigint) AS 
 update jyang_workspace.commission 
@@ -1071,26 +1048,11 @@ execute prep_exception_Updates_23 (f_get_commission_batch_id());
 execute prep_exception_Updates_24 (f_get_commission_batch_id());
 execute prep_exception_Updates_25 (f_get_commission_batch_id());
 execute prep_exception_Updates_26 (f_get_commission_batch_id());
+execute prep_exception_Updates_27 (f_get_commission_batch_id());
+execute prep_exception_Updates_28 (f_get_commission_batch_id());
+execute prep_exception_Updates_29 (f_get_commission_batch_id());
+execute prep_exception_Updates_30 (f_get_commission_batch_id());
+execute prep_exception_Updates_31 (f_get_commission_batch_id());
+execute prep_exception_Updates_32 (f_get_commission_batch_id());
 
 execute prep_set_Status_To_Final (f_get_commission_batch_id());
-
-/*
---delete jyang_workspace.COMMISSION;
-
---delete jyang_workspace.COMMISSION_ADD_FUNDS_DETAIL;
-
-select * from jyang_workspace.commission_add_funds_detail;
-
-select * from jyang_workspace.COMMISSION_config;
-
-*/
-
--- 930
-select * from jyang_workspace.commission_add_funds_detail;
-
--- 23662
-select count(1) from jyang_workspace.COMMISSION;
-
-select * from jyang_workspace.COMMISSION;
-
-select * from jyang_workspace.COMMISSION;
