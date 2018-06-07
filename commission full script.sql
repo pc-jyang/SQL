@@ -1,4 +1,4 @@
- /* * * *
+/* * * *
   *
   * Add initial trading for fa role
   *
@@ -334,8 +334,17 @@ insert into jyang_workspace.commission
         ) v
         where sort_seq = 1
         and comm_date <= trunc(sysdate);
-        
- /* * * *
+		
+execute prep_load_FA_InitialTrading (f_get_commission_batch_id(), f_get_commission_month());
+
+execute prep_load_FA_CashAdditions (f_get_commission_batch_id(), f_get_commission_month());
+
+execute prep_store_audit_data (f_get_commission_batch_id());
+
+execute prep_load_SA_InitialTrading (f_get_commission_batch_id(), f_get_commission_month());
+
+
+/* * * *
   *
   * Load SA Meetings Set With IG 
   *
@@ -448,7 +457,7 @@ insert into jyang_workspace.commission
             where t.type in ('SA Held - Info Gathering', 'SA Held', 'SA Meeting Held', 'SA Held - In Person Info Gathering','SA - Held')
             and t.activity_date >= add_months($2, -1)
 			and t.activity_date < $2
-			-- and t2.activity_date < $2
+			and t2.activity_date < $2
             and xc.comm_type = 'sa-meeting-set-fa-ig-held' and xc.emp_role = 'sa'            
             ) v
         -- left outer join jyang_workspace.commission comm on v.account_id = comm.account_id and  comm.comm_type = 'sa-meeting-set-fa-ig-held' 
@@ -494,9 +503,9 @@ insert into jyang_workspace.COMMISSION_AUM_DETAIL
             and com.initial_trading_date is not null
             group by commission_batch_id, com.user_id, com.comm_date
         ) com
-        join sp_schema.user_account_snapshot uas on com.user_id = uas.user_id 
+        join sp_schema.user_account_snapshot_onus uas on com.user_id = uas.user_id 
         and com.comm_date - 1 = uas.snapshot_date 
-        and uas.snapshot_interval = 0 
+        --and uas.snapshot_interval = 0 
         join sp_schema.user_account ua on uas.user_account_id = ua.user_account_id and uas.snapshot_date >= ua.initial_trading_date
         and ua.is_onus = 1;
 
@@ -659,7 +668,10 @@ UPDATE jyang_workspace.commission
         , financial_advisor_id = source.financial_advisor_id
         , opportunity_owner_name = source.opportunity_owner_name
         , opportunity_owner_id = source.opportunity_owner_id
-        , pay_to_name = CASE WHEN source.pay_to_name LIKE '%CFP' THEN source.pay_to_name ELSE replace(source.pay_to_name,source.pay_to_name, source.pay_to_name||' CFP') END
+		-- 'Tyler Boyce CFP®'
+        , pay_to_name = CASE WHEN source.pay_to_name LIKE '%CFP' THEN source.pay_to_name 
+       						 WHEN source.pay_to_name LIKE '%CFP®' THEN replace(source.pay_to_name, 'CFP®', 'CFP') 
+			ELSE replace(source.pay_to_name,source.pay_to_name, source.pay_to_name||' CFP') END
         , pay_to_id = source.pay_to_id
         , pcg_financial_advisor_id = source.pcg_financial_advisor
         , pcg_financial_advisor_name = source.pcg_financial_advisor_name
@@ -931,20 +943,20 @@ PREPARE prep_exception_Updates_28 (bigint) AS
 delete from jyang_workspace.commission
 where commission_batch_id = $1
 and pay_to_id in ( '005F0000007k4kfIAA', '0050G000008LBxpQAG', '0050G000008LGu3QAG', '0050G000008LaHnQAK')       
-and comm_date >= to_date('2018-02-01', 'YYYY-MM-DD');   
+and comm_date >= to_date('2018-02-01', 'YYYY-MM-DD');  
 
 -- Michael Hunter initial
 PREPARE prep_exception_Updates_29 (bigint) AS 
 delete from jyang_workspace.commission
 where commission_batch_id = $1
-and pay_to_name = 'Michael Hunter CFP'
+and pay_to_name like 'Michael Hunter%'
 and initial_trading_date >= to_date('2017-03-01', 'YYYY-MM-DD');
         
 -- Michael Hunter max overall
 PREPARE prep_exception_Updates_30 (bigint) AS 
 delete from jyang_workspace.commission
 where commission_batch_id = $1
-and pay_to_name = 'Michael Hunter CFP'
+and pay_to_name like 'Michael Hunter%'
         and comm_date >= to_date('2018-03-01', 'YYYY-MM-DD');
 
 /*
@@ -987,24 +999,49 @@ and pay_to_id in ('005A0000001H54PIAS'
                  ,'005F00000045BfMIAU'
                  ,'005F00000046CiQIAU'
                  ,'005F00000047izxIAA'
-				  -- Brian Coburn
+				 -- Brian Coburn
 				 ,'0050G0000096LYNQA2'
 				 -- Patrick Duggan
-                 ,'005F00000089drFIAQ');
+                 ,'005F00000089drFIAQ'
+				  --Windred Boyce 
+				 , '0050G0000096OuTQAU'
+				 -- Tyler Schroeder 0050G000008L3KYQA0
+                 , '0050G000008L3KYQA0' 
+				 -- Tyler Graff 
+                 , '005F0000007jqCJIAY'
+				 -- Hayward Adams
+                 , '0050G000008Lb54QAC'
+				 -- Steven Smith
+				 , '0050G000009VuifQAC' 
+				 -- Wylie Smithwick
+                 , '0050G000009VmsNQAS'
+				 -- Adam Mazzaro
+				 , '005F0000002D5PMIA0'
+				 -- Bryan Walls
+				 , '0050G000008LiIcQAK'
+				 -- Paige Sheeder
+				 , '0050G000008LGtyQAG');
+				 
+				 
+-- steve.nykamp@personalcapital.com
+PREPARE prep_exception_Updates_33 (bigint) AS 
+delete from jyang_workspace.commission 
+where commission_batch_id = $1
+and pay_to_id = '005F0000001CwgiIAC'
+and initial_trading_date >= to_date('2018-02-01', 'YYYY-MM-DD');
+ 
+-- david.goodman@personalcapital.com
+PREPARE prep_exception_Updates_34 (bigint) AS 
+delete from jyang_workspace.commission 
+where commission_batch_id = $1
+and pay_to_id = '005F0000006hYIGIA2'
+and initial_trading_date >= to_date('2018-02-01', 'YYYY-MM-DD');
+                
                  
 PREPARE prep_set_Status_To_Final (bigint) AS 
 update jyang_workspace.commission 
    set status = 'final'
  where commission_batch_id = $1;
-
-
-execute prep_load_FA_InitialTrading (f_get_commission_batch_id(), f_get_commission_month());
-
-execute prep_load_FA_CashAdditions (f_get_commission_batch_id(), f_get_commission_month());
-
-execute prep_store_audit_data (f_get_commission_batch_id());
-
-execute prep_load_SA_InitialTrading (f_get_commission_batch_id(), f_get_commission_month());
 
 execute prep_load_SA_MeetingsSetWithIG (f_get_commission_batch_id(), f_get_commission_month());
 
@@ -1054,5 +1091,25 @@ execute prep_exception_Updates_29 (f_get_commission_batch_id());
 execute prep_exception_Updates_30 (f_get_commission_batch_id());
 execute prep_exception_Updates_31 (f_get_commission_batch_id());
 execute prep_exception_Updates_32 (f_get_commission_batch_id());
+execute prep_exception_Updates_33 (f_get_commission_batch_id());
+execute prep_exception_Updates_34 (f_get_commission_batch_id());
+-- execute prep_set_Status_To_Final (f_get_commission_batch_id());
 
-execute prep_set_Status_To_Final (f_get_commission_batch_id());
+/*
+select * from jyang_workspace.commission where commission_batch_id = '201805072326'; 
+
+-- 14002
+select * from jyang_workspace.commission where commission_batch_id != '201805072326' and comm_date = '2018-05-01'; 
+ 
+select commission_batch_id, count(1) from jyang_workspace.commission where comm_date = '2018-05-01' group by commission_batch_id; 
+
+select commission_batch_id, count(1) from jyang_workspace.commission where comm_date = '2018-04-01' group by commission_batch_id order by commission_batch_id; 
+
+-- 201805072326
+select f_get_commission_batch_id();
+
+update jyang_workspace.commission 
+   set status = 'preliminary'
+ where commission_batch_id!= '201804061825' and comm_date = '2018-04-01';*/
+ 
+ 
